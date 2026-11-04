@@ -33,8 +33,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev gawk \
-            gettext libssl-dev xsltproc wget unzip python3 rsync file zstd
+          sudo apt-get install -y make unzip bzip2
 
       - name: Download ImageBuilder from release
         run: |
@@ -57,7 +56,7 @@ jobs:
             make info
             exit 1
           fi
-          make image PROFILE="$PROFILE" FILES="$GITHUB_WORKSPACE/files"
+          make image PROFILE="$PROFILE" FILES="$GITHUB_WORKSPACE/files" PACKAGES="luci luci-proto-wireguard luci-app-pbr tcpdump -apk-mbedtls -ca-bundle -dnsmasq dnsmasq-full"
           ls -lh bin/targets/*/*/
 
       - uses: actions/upload-artifact@v4
