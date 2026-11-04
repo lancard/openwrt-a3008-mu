@@ -1,51 +1,78 @@
 #!/bin/sh /etc/rc.common
-# /etc/config <-> raw mtd 자동 저장/복원
+# /etc 일부 파일 <-> raw mtd 자동 저장/복원
 
 START=05                      # network(20)보다 먼저 복원
 USE_PROCD=1
 EXTRA_COMMANDS="save restore"
-EXTRA_HELP="saveSave /etc/config to mtd
-restoreRestore /etc/config from mtd"
+EXTRA_HELP="	save	Save /etc files to mtd
+	restore	Restore /etc files from mtd"
 
 MTD=config                    # mtd write 에 쓰는 파티션 이름
 MTDDEV=/dev/mtd1ro            # 읽기용 장치
 MAXSIZE=65000
 LOCK=/tmp/cfgsave.lock
 HASH=/tmp/cfgsave.md5
+FILES="config passwd shadow iproute2"     # /etc 기준 상대 경로
 
-hash_cfg() { cat /etc/config/* 2>/dev/null | md5sum | cut -d' ' -f1; }
+# S05는 logd보다 먼저라 logread에 안 남으므로 kmsg에도 기록 (dmesg | grep cfgsave)
+log() {
+    echo "cfgsave: $*" > /dev/kmsg 2>/dev/null
+    logger -t cfgsave "$*"
+}
+
+# 실제로 존재하는 대상만 출력
+existing_files() {
+    for f in $FILES; do [ -e "/etc/$f" ] && printf '%s ' "$f"; done
+}
+
+hash_cfg() {
+    ( cd /etc && for f in $FILES; do [ -e "$f" ] && find "$f" -type f; done \
+        | sort | xargs cat 2>/dev/null ) | md5sum | cut -d' ' -f1
+}
 
 restore() {
     dd if=$MTDDEV of=/tmp/cfg.raw bs=64k count=1 2>/dev/null
-    [ "$(head -c 4 /tmp/cfg.raw)" = "CFG1" ] || { logger -t cfgsave "mtd empty, skip restore"; return 0; }
+    [ "$(head -c 4 /tmp/cfg.raw)" = "CFG1" ] || { log "mtd empty, skip restore"; return 0; }
 
     SIZE=$(printf "%d" 0x$(head -c 12 /tmp/cfg.raw | tail -c 8))
     if [ "$SIZE" -le 0 ] || [ "$SIZE" -gt "$MAXSIZE" ]; then
-        logger -t cfgsave "bad size: $SIZE"
+        log "bad size: $SIZE"
         return 1
     fi
 
     tail -c +13 /tmp/cfg.raw | head -c "$SIZE" > /tmp/cfg.tgz
-    tar tzf /tmp/cfg.tgz >/dev/null 2>&1 || { logger -t cfgsave "corrupt archive"; return 1; }
+    tar tzf /tmp/cfg.tgz >/dev/null 2>&1 || { log "corrupt archive"; return 1; }
 
     rm -rf /tmp/cfgrestore && mkdir -p /tmp/cfgrestore
-    tar xzf /tmp/cfg.tgz -C /tmp/cfgrestore && cp -a /tmp/cfgrestore/config/. /etc/config/
+    tar xzf /tmp/cfg.tgz -C /tmp/cfgrestore || { log "extract failed"; return 1; }
+
+    for f in $FILES; do
+        SRC=/tmp/cfgrestore/$f
+        [ -e "$SRC" ] || continue
+        if [ -d "$SRC" ]; then
+            mkdir -p "/etc/$f" && cp -a "$SRC/." "/etc/$f/"
+        else
+            # 임시 이름으로 복사한 뒤 mv (중간에 끊겨도 반쪽 파일이 안 남음)
+            cp -a "$SRC" "/etc/.$f.cfgsave" && mv -f "/etc/.$f.cfgsave" "/etc/$f"
+        fi
+    done
+
     rm -rf /tmp/cfgrestore /tmp/cfg.raw
     hash_cfg > $HASH
-    logger -t cfgsave "restored from $MTD"
+    log "restored from $MTD"
 }
 
 save() {
-    tar czf /tmp/cfg.tgz -C /etc config || return 1
+    tar czf /tmp/cfg.tgz -C /etc $(existing_files) || return 1
     SIZE=$(wc -c < /tmp/cfg.tgz)
     if [ "$SIZE" -gt "$MAXSIZE" ]; then
-        logger -t cfgsave "too big: $SIZE"
+        log "too big: $SIZE"
         return 1
     fi
     printf "CFG1%08x" "$SIZE" > /tmp/cfg.bin
     cat /tmp/cfg.tgz >> /tmp/cfg.bin
     mtd write /tmp/cfg.bin $MTD && hash_cfg > $HASH
-    logger -t cfgsave "saved ($SIZE bytes)"
+    log "saved ($SIZE bytes)"
     rm -f /tmp/cfg.bin
 }
 
