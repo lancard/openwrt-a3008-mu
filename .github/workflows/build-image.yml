@@ -11,10 +11,6 @@ on:
         description: "ImageBuilder PROFILE"
         required: true
         default: "iptime_a3008-mu"
-      extra_packages:
-        description: "추가 패키지 (공백 구분, 제거는 -pkg)"
-        required: false
-        default: ""
       publish_release:
         description: "결과물을 Release 로도 올림"
         type: boolean
@@ -29,7 +25,6 @@ jobs:
     env:
       REF: ${{ inputs.openwrt_ref }}
       PROFILE: ${{ inputs.profile }}
-      EXTRA: ${{ inputs.extra_packages }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
@@ -48,18 +43,6 @@ jobs:
           mkdir ib
           tar -xf "$(ls dl/openwrt-imagebuilder-* | head -n1)" -C ib --strip-components=1
 
-      - name: Collect packages
-        run: |
-          PKGS=""
-          if [ -f config/packages.txt ]; then
-            PKGS=$(sed 's/#.*//' config/packages.txt | tr '\n' ' ')
-          fi
-          echo "PACKAGES=$PKGS $EXTRA" >> "$GITHUB_ENV"
-
-          if [ -d extra-packages ]; then
-            cp extra-packages/*.ipk ib/packages/ 2>/dev/null || true
-          fi
-
       - name: Prepare files
         run: |
           mkdir -p files
@@ -74,7 +57,7 @@ jobs:
             make info
             exit 1
           fi
-          make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" FILES="$GITHUB_WORKSPACE/files"
+          make image PROFILE="$PROFILE" FILES="$GITHUB_WORKSPACE/files"
           ls -lh bin/targets/*/*/
 
       - uses: actions/upload-artifact@v4
@@ -87,5 +70,4 @@ jobs:
         run: |
           TAG="firmware-$(echo "$REF" | tr '/' '-')-${GITHUB_RUN_NUMBER}"
           gh release create "$TAG" ib/bin/targets/*/*/openwrt-* \
-            --title "$PROFILE ($REF) #${GITHUB_RUN_NUMBER}" \
-            --notes "packages: $PACKAGES"
+            --title "$PROFILE ($REF) #${GITHUB_RUN_NUMBER}"
