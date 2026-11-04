@@ -1,0 +1,77 @@
+#!/bin/sh /etc/rc.common
+# /etc/config <-> raw mtd 자동 저장/복원
+
+START=05                      # network(20)보다 먼저 복원
+USE_PROCD=1
+EXTRA_COMMANDS="save restore"
+EXTRA_HELP="saveSave /etc/config to mtd
+restoreRestore /etc/config from mtd"
+
+MTD=config                    # mtd write 에 쓰는 파티션 이름
+MTDDEV=/dev/mtd1ro            # 읽기용 장치
+MAXSIZE=65000
+LOCK=/tmp/cfgsave.lock
+HASH=/tmp/cfgsave.md5
+
+hash_cfg() { cat /etc/config/* 2>/dev/null | md5sum | cut -d' ' -f1; }
+
+restore() {
+    dd if=$MTDDEV of=/tmp/cfg.raw bs=64k count=1 2>/dev/null
+    [ "$(head -c 4 /tmp/cfg.raw)" = "CFG1" ] || { logger -t cfgsave "mtd empty, skip restore"; return 0; }
+
+    SIZE=$(printf "%d" 0x$(head -c 12 /tmp/cfg.raw | tail -c 8))
+    if [ "$SIZE" -le 0 ] || [ "$SIZE" -gt "$MAXSIZE" ]; then
+        logger -t cfgsave "bad size: $SIZE"
+        return 1
+    fi
+
+    tail -c +13 /tmp/cfg.raw | head -c "$SIZE" > /tmp/cfg.tgz
+    tar tzf /tmp/cfg.tgz >/dev/null 2>&1 || { logger -t cfgsave "corrupt archive"; return 1; }
+
+    rm -rf /tmp/cfgrestore && mkdir -p /tmp/cfgrestore
+    tar xzf /tmp/cfg.tgz -C /tmp/cfgrestore && cp -a /tmp/cfgrestore/config/. /etc/config/
+    rm -rf /tmp/cfgrestore /tmp/cfg.raw
+    hash_cfg > $HASH
+    logger -t cfgsave "restored from $MTD"
+}
+
+save() {
+    tar czf /tmp/cfg.tgz -C /etc config || return 1
+    SIZE=$(wc -c < /tmp/cfg.tgz)
+    if [ "$SIZE" -gt "$MAXSIZE" ]; then
+        logger -t cfgsave "too big: $SIZE"
+        return 1
+    fi
+    printf "CFG1%08x" "$SIZE" > /tmp/cfg.bin
+    cat /tmp/cfg.tgz >> /tmp/cfg.bin
+    mtd write /tmp/cfg.bin $MTD && hash_cfg > $HASH
+    logger -t cfgsave "saved ($SIZE bytes)"
+    rm -f /tmp/cfg.bin
+}
+
+boot() {
+    restore
+    start
+}
+
+start_service() {
+    procd_open_instance
+    procd_set_param command /bin/sleep infinity
+    procd_close_instance
+}
+
+reload_service() {
+    [ -e $LOCK ] && return 0
+    touch $LOCK
+    (
+        sleep 3                                   # config별 이벤트가 몰려오는 동안 대기
+        [ "$(hash_cfg)" != "$(cat $HASH 2>/dev/null)" ] && save
+        rm -f $LOCK
+    ) >/dev/null 2>&1 &
+}
+
+service_triggers() {
+    for c in network wireless firewall dhcp system dropbear; do
+        procd_add_config_trigger "config.change" "$c" /etc/init.d/cfgsave reload
+    done
+}
