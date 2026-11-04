@@ -1,0 +1,91 @@
+name: Build Image (squashfs)
+
+on:
+  workflow_dispatch:
+    inputs:
+      openwrt_ref:
+        description: "ImageBuilder를 만들 때 쓴 OpenWrt tag/branch (같은 값)"
+        required: true
+        default: "v24.10.0"
+      profile:
+        description: "ImageBuilder PROFILE"
+        required: true
+        default: "iptime_a3008-mu"
+      extra_packages:
+        description: "추가 패키지 (공백 구분, 제거는 -pkg)"
+        required: false
+        default: ""
+      publish_release:
+        description: "결과물을 Release 로도 올림"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    env:
+      REF: ${{ inputs.openwrt_ref }}
+      PROFILE: ${{ inputs.profile }}
+      EXTRA: ${{ inputs.extra_packages }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses-dev zlib1g-dev gawk \
+            gettext libssl-dev xsltproc wget unzip python3 rsync file zstd
+
+      - name: Download ImageBuilder from release
+        run: |
+          TAG="imagebuilder-$(echo "$REF" | tr '/' '-')"
+          gh release download "$TAG" --pattern 'openwrt-imagebuilder-*' --dir dl
+          mkdir ib
+          tar -xf "$(ls dl/openwrt-imagebuilder-* | head -n1)" -C ib --strip-components=1
+
+      - name: Collect packages
+        run: |
+          PKGS=""
+          if [ -f config/packages.txt ]; then
+            PKGS=$(sed 's/#.*//' config/packages.txt | tr '\n' ' ')
+          fi
+          echo "PACKAGES=$PKGS $EXTRA" >> "$GITHUB_ENV"
+
+          if [ -d extra-packages ]; then
+            cp extra-packages/*.ipk ib/packages/ 2>/dev/null || true
+          fi
+
+      - name: Prepare files overlay
+        run: |
+          mkdir -p files
+          chmod +x files/etc/init.d/* 2>/dev/null || true
+          find files -maxdepth 4 | sort
+
+      - name: Build image
+        working-directory: ib
+        run: |
+          if ! make info | grep -q "^${PROFILE}:"; then
+            echo "profile '$PROFILE' not found. available:"
+            make info
+            exit 1
+          fi
+          make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" FILES="$GITHUB_WORKSPACE/files"
+          ls -lh bin/targets/*/*/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ inputs.profile }}
+          path: ib/bin/targets/*/*/openwrt-*
+
+      - name: Publish release
+        if: ${{ inputs.publish_release }}
+        run: |
+          TAG="firmware-$(echo "$REF" | tr '/' '-')-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" ib/bin/targets/*/*/openwrt-* \
+            --title "$PROFILE ($REF) #${GITHUB_RUN_NUMBER}" \
+            --notes "packages: $PACKAGES"
