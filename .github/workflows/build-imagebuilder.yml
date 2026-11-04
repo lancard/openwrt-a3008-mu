@@ -6,7 +6,7 @@ on:
       openwrt_ref:
         description: "OpenWrt tag or branch (예: v24.10.0, openwrt-24.10)"
         required: true
-        default: "v24.10.0"
+        default: "v25.12.6"
 
 permissions:
   contents: write
