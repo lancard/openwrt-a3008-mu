@@ -14,7 +14,7 @@ on:
       publish_release:
         description: "결과물을 Release 로도 올림"
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: write
