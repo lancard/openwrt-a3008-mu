@@ -60,7 +60,7 @@ jobs:
             cp extra-packages/*.ipk ib/packages/ 2>/dev/null || true
           fi
 
-      - name: Prepare files overlay
+      - name: Prepare files
         run: |
           mkdir -p files
           chmod +x files/etc/init.d/* 2>/dev/null || true
