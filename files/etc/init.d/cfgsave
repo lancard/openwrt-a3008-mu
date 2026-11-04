@@ -12,7 +12,7 @@ MTDDEV=/dev/mtd1ro            # 읽기용 장치
 MAXSIZE=65000
 LOCK=/tmp/cfgsave.lock
 HASH=/tmp/cfgsave.md5
-FILES="config passwd shadow iproute2"     # /etc 기준 상대 경로
+FILES="config passwd shadow iproute2 dropbear"     # /etc 기준 상대 경로
 
 # S05는 logd보다 먼저라 logread에 안 남으므로 kmsg에도 기록 (dmesg | grep cfgsave)
 log() {
