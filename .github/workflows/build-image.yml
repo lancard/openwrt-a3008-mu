@@ -6,7 +6,7 @@ on:
       openwrt_ref:
         description: "ImageBuilder를 만들 때 쓴 OpenWrt tag/branch (같은 값)"
         required: true
-        default: "v24.10.0"
+        default: "v25.12.6"
       profile:
         description: "ImageBuilder PROFILE"
         required: true
