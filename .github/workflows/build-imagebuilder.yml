@@ -49,17 +49,10 @@ jobs:
           restore-keys: |
             ib-${{ inputs.openwrt_ref }}-
 
-      - name: Apply custom files (overlay, patches)
+      - name: Apply custom files
         working-directory: openwrt
         run: |
-          if [ -d ../config/overlay ]; then
-            cp -a ../config/overlay/. .
-          fi
-          for p in ../config/patches/*.patch; do
-            [ -e "$p" ] || continue
-            echo "apply $p"
-            git apply --whitespace=nowarn "$p"
-          done
+          cp -a ../config/target/. ./target/
 
       - name: Feeds
         working-directory: openwrt
